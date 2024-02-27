@@ -1,5 +1,3 @@
-
-
 #s3 bucket for terraform backend
 resource "aws_s3_bucket" "backend" {
   count  = var.create_vpc ? 1 : 0
