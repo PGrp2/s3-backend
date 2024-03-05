@@ -36,7 +36,7 @@ resource "aws_iam_role" "replication_role" {
   })
 }
 
-#kms key for bucket encryption
+#kms key for bucket encryption. Note that "arn:aws:iam::657678360112:root" should be replaced with that of the principal
 resource "aws_kms_key" "my_key" {
   description             = "This key is used to encrypt bucket objects"
   deletion_window_in_days = 10
@@ -145,6 +145,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
   }
 }
 
+# Note "replication-s3-group2" is an existing bucket on AWS ment for object replication and logging of the primary bucket, replace with the principal's existing s3 bucket.
 resource "aws_s3_bucket_logging" "example" {
   bucket        = "replication-s3-group2"
   target_bucket = "replication-s3-group2"
