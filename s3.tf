@@ -1,12 +1,39 @@
-#s3 bucket for terraform backend
 resource "aws_s3_bucket" "backend" {
   count  = var.create_vpc ? 1 : 0
-  bucket = "bootcamp32-${lower(var.env)}-${random_integer.backend.result}"
+  bucket = "group2-${lower(var.env)}-${random_integer.backend.result}"
 
   tags = {
     Name        = "My backend"
     Environment = "Dev"
   }
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    id      = "example-lifecycle-rule"
+    enabled = true
+
+    expiration {
+      days = 30
+    }
+  }
+
+}
+
+resource "aws_iam_role" "replication_role" {
+  name = "s3-replication-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Service = "s3.amazonaws.com"
+      },
+      Action = "sts:AssumeRole"
+    }]
+  })
 }
 
 #kms key for bucket encryption
@@ -15,28 +42,26 @@ resource "aws_kms_key" "my_key" {
   deletion_window_in_days = 10
   enable_key_rotation     = true
   policy                  = <<POLICY
-  {
-    "Version": "2012-10-17",
-    "Id": "default",
-    "Statement": [
-      {
-        "Sid": "DefaultAllow",
-        "Effect": "Allow",
-        "Principal": {
-          "AWS": "arn:aws:iam::123456789012:root"
+{
+  "Version": "2012-10-17",
+  "Id": "key-consolepolicy-3",
+  "Statement": [
+    {
+      "Sid": "Enable IAM User Permissions",
+      "Effect": "Allow",
+      "Principal": {
+          "AWS": "arn:aws:iam::657678360112:root"  
         },
-        "Action": "kms:*",
-        "Resource": "*"
-      }
-    ]
-  }
+      "Action": "kms:*",
+      "Resource": "*"
+    }
+  ]
+}
 POLICY
 }
 
-
 resource "aws_s3_bucket_server_side_encryption_configuration" "example" {
   bucket = aws_s3_bucket.backend[0].id
-
   rule {
     apply_server_side_encryption_by_default {
       kms_master_key_id = aws_kms_key.my_key.arn
@@ -58,26 +83,12 @@ resource "random_integer" "backend" {
 resource "aws_s3_bucket_versioning" "versioning_example" {
   bucket = aws_s3_bucket.backend[0].id
   versioning_configuration {
-    status = var.versioning
-  }
-}
-
-resource "aws_sns_topic" "bucket_notifications" {
-  name              = "bucket-notifications"
-  kms_master_key_id = "alias/aws/sns"
-}
-
-resource "aws_s3_bucket_notification" "bucket_notification" {
-  bucket = aws_s3_bucket.backend[0].id
-  topic {
-    topic_arn     = aws_sns_topic.bucket_notifications.arn
-    events        = ["s3:ObjectCreated:*"]
-    filter_prefix = "logs/"
+    status = "Enabled"
   }
 }
 
 # Public access block
-resource "aws_s3_bucket_public_access_block" "access_backend" {
+resource "aws_s3_bucket_public_access_block" "access_block" {
   bucket                  = aws_s3_bucket.backend[0].id
   block_public_acls       = true
   block_public_policy     = true
@@ -85,33 +96,32 @@ resource "aws_s3_bucket_public_access_block" "access_backend" {
   ignore_public_acls      = true
 }
 
-
-resource "aws_s3_bucket_acl" "bucket_acl" {
-  bucket = aws_s3_bucket.backend[0].id
-  acl    = "private"
-}
-
 resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
   bucket = aws_s3_bucket.backend[0].id
 
   rule {
-    id = "log"
+    id = "abort_failed_uploads"
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+    filter {}
+    status = "Enabled"
+  }
 
+  rule {
+    id = "log"
     expiration {
       days = 90
     }
-
     filter {
       and {
         prefix = "log/"
-
         tags = {
           rule      = "log"
           autoclean = "true"
         }
       }
     }
-
     status = "Enabled"
     transition {
       days          = 30
@@ -122,6 +132,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
       storage_class = "GLACIER"
     }
   }
+
   rule {
     id = "tmp"
     filter {
@@ -134,15 +145,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "bucket-config" {
   }
 }
 
-resource "aws_s3_bucket_acl" "versioning_bucket_acl" {
-  bucket = aws_s3_bucket.backend[0].id
-  acl    = "private"
-}
-
 resource "aws_s3_bucket_logging" "example" {
-  bucket        = aws_s3_bucket.backend[0].id
-  target_bucket = aws_s3_bucket.backend[0].id
-  target_prefix = "log/"
+  bucket        = "replication-s3-group2"
+  target_bucket = "replication-s3-group2"
+  target_prefix = "logs/"
 }
 
 
@@ -150,7 +156,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "pass" {
   bucket = aws_s3_bucket.backend[0].id
   rule {
     abort_incomplete_multipart_upload {
-      days_after_initiation = 14
+      days_after_initiation = 7
     }
     filter {}
     id     = "log"
